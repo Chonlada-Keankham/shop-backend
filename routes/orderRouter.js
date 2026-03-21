@@ -27,4 +27,5 @@ router.get("/my-orders", verifyToken, (req, res) => {
         }
     );
 });
+router.post("/checkout", verifyToken, orderController.checkout);
 module.exports = router;

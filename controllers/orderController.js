@@ -442,3 +442,16 @@ exports.checkout = (req, res) => {
     });
   });
 };
+exports.getMyOrders = (req, res) => {
+  const userId = req.user.id;
+
+  db.query(
+    "SELECT * FROM orders WHERE user_id = ? ORDER BY id DESC",
+    [userId],
+    (err, result) => {
+      if (err) return res.status(500).json({ message: "Error" });
+
+      res.json(result);
+    }
+  );
+};
