@@ -1,5 +1,12 @@
 const mysql = require("mysql2");
 
+console.log("DB ENV CHECK:", {
+  host: process.env.MYSQLHOST,
+  port: process.env.MYSQLPORT,
+  user: process.env.MYSQLUSER,
+  database: process.env.MYSQLDATABASE,
+});
+
 const db = mysql.createConnection({
   host: process.env.MYSQLHOST,
   port: process.env.MYSQLPORT,
