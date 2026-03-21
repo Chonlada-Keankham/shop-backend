@@ -1,4 +1,4 @@
-const db = require('../config/db');
+const db = require("../config/db");
 
 // -------------------------------------------------------------------
 // GET ALL PRODUCTS (PUBLIC)
@@ -176,12 +176,4 @@ exports.deleteProduct = (req, res) => {
       message: "Product deleted successfully",
     });
   });
-};
-
-module.exports = {
-  createProduct,
-  getAllProducts,
-  getProductById,
-  patchProduct,
-  deleteProduct,
 };
