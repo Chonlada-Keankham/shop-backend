@@ -24,7 +24,7 @@ const isPositiveInteger = (value) => {
 };
 
 // -------------------------------------------------------------------
-// 🔸 CREATE ORDER
+// 🔸 CREATE ORDER (MANUAL / ADMIN)
 // -------------------------------------------------------------------
 exports.createOrder = (req, res) => {
   const {
@@ -351,107 +351,273 @@ exports.deleteOrder = (req, res) => {
 };
 
 // -------------------------------------------------------------------
-// 🔸 checkout ORDER
+// 🔸 GET MY ORDERS
 // -------------------------------------------------------------------
+exports.getMyOrders = (req, res) => {
+  const userId = req.user.id;
 
+  const sql = `
+    SELECT *
+    FROM orders
+    WHERE user_id = ?
+    ORDER BY id DESC
+  `;
+
+  db.query(sql, [userId], (err, result) => {
+    if (err) {
+      return sendError(res, 500, "Failed to get my orders", err.message);
+    }
+
+    return sendSuccess(res, 200, "My orders retrieved successfully", result);
+  });
+};
+
+// -------------------------------------------------------------------
+// 🔸 CHECKOUT
+// -------------------------------------------------------------------
+// -------------------------------------------------------------------
+// 🔸 CHECKOUT
+// -------------------------------------------------------------------
 exports.checkout = (req, res) => {
-  const user_id = req.user.id;
+  const userId = req.user.id;
+  const { customer_name, customer_address, customer_phone } = req.body || {};
 
-  const cartSql = `
-    SELECT * FROM carts
+  console.log("CHECKOUT BODY:", req.body);
+  console.log("CHECKOUT USER ID:", userId);
+
+  if (!customer_name || !customer_address || !customer_phone) {
+    return sendError(
+      res,
+      400,
+      "customer_name, customer_address, and customer_phone are required"
+    );
+  }
+
+  const getCartSql = `
+    SELECT *
+    FROM carts
     WHERE user_id = ? AND status = 'active'
     LIMIT 1
   `;
 
-  db.query(cartSql, [user_id], (cartErr, cartResult) => {
-    if (cartErr) return sendError(res, 500, "Failed to get cart");
+  db.query(getCartSql, [userId], (cartErr, cartResult) => {
+    if (cartErr) {
+      console.log("GET CART ERROR:", cartErr);
+      return sendError(res, 500, "Failed to get active cart", cartErr.message);
+    }
+
+    console.log("CART RESULT:", cartResult);
 
     if (cartResult.length === 0) {
-      return sendError(res, 404, "No active cart");
+      return sendError(res, 404, "Active cart not found");
     }
 
     const cart = cartResult[0];
 
-    const itemsSql = `
-      SELECT ci.*, p.price, p.stock
+    const getItemsSql = `
+      SELECT 
+        ci.product_id,
+        ci.quantity,
+        p.name AS product_name,
+        p.price,
+        p.stock,
+        (ci.quantity * p.price) AS subtotal
       FROM cart_items ci
       JOIN products p ON ci.product_id = p.id
       WHERE ci.cart_id = ?
     `;
 
-    db.query(itemsSql, [cart.id], (itemsErr, items) => {
-      if (itemsErr) return sendError(res, 500, "Failed to get items");
-
-      if (items.length === 0) {
-        return sendError(res, 400, "Cart empty");
+    db.query(getItemsSql, [cart.id], (itemsErr, itemsResult) => {
+      if (itemsErr) {
+        console.log("GET ITEMS ERROR:", itemsErr);
+        return sendError(res, 500, "Failed to get cart items", itemsErr.message);
       }
 
-      for (let item of items) {
-        if (item.stock < item.quantity) {
-          return sendError(res, 400, "Stock not enough");
+      console.log("ITEMS RESULT:", itemsResult);
+
+      if (itemsResult.length === 0) {
+        return sendError(res, 400, "Cart is empty");
+      }
+
+      for (const item of itemsResult) {
+        if (Number(item.stock) < Number(item.quantity)) {
+          return sendError(
+            res,
+            400,
+            `Insufficient stock for product: ${item.product_name}`
+          );
         }
       }
 
-      const subtotal = items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
+      const subtotal = itemsResult.reduce(
+        (sum, item) => sum + Number(item.subtotal),
         0
       );
+      const discount = 0;
+      const vat = Number((subtotal * 0.07).toFixed(2));
+      const total = Number((subtotal - discount + vat).toFixed(2));
+      const orderCode = `ORD-${Date.now()}`;
 
-      const orderSql = `
-        INSERT INTO orders (user_id, subtotal, total, status)
-        VALUES (?, ?, ?, 'pending')
+      console.log("ORDER DATA:", {
+        orderCode,
+        userId,
+        customer_name,
+        customer_address,
+        customer_phone,
+        subtotal,
+        discount,
+        vat,
+        total,
+      });
+
+      const insertOrderSql = `
+        INSERT INTO orders (
+          order_code,
+          user_id,
+          customer_name,
+          customer_address,
+          customer_phone,
+          subtotal,
+          discount,
+          vat,
+          total,
+          status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
       `;
 
-      db.query(orderSql, [user_id, subtotal, subtotal], (err, result) => {
-        if (err) return sendError(res, 500, "Create order failed");
-
-        const orderId = result.insertId;
-
-        const values = items.map((item) => [
-          orderId,
-          item.product_id,
-          item.quantity,
-          item.price,
-          item.price * item.quantity,
-        ]);
-
-        db.query(
-          `INSERT INTO order_items (order_id, product_id, quantity, price, subtotal) VALUES ?`,
-          [values],
-          (oiErr) => {
-            if (oiErr) return sendError(res, 500, "Create order items failed");
-
-            items.forEach((item) => {
-              db.query(
-                `UPDATE products SET stock = stock - ? WHERE id = ?`,
-                [item.quantity, item.product_id]
-              );
-            });
-
-            db.query(`DELETE FROM cart_items WHERE cart_id = ?`, [cart.id]);
-            db.query(`UPDATE carts SET status = 'checked_out' WHERE id = ?`, [
-              cart.id,
-            ]);
-
-            return sendSuccess(res, 201, "Checkout success", {
-              orderId,
-            });
+      db.query(
+        insertOrderSql,
+        [
+          orderCode,
+          userId,
+          customer_name,
+          customer_address,
+          customer_phone,
+          subtotal,
+          discount,
+          vat,
+          total,
+        ],
+        (orderErr, orderResult) => {
+          if (orderErr) {
+            console.log("INSERT ORDER ERROR:", orderErr);
+            return sendError(res, 500, "Failed to create order", orderErr.message);
           }
-        );
-      });
+
+          console.log("ORDER INSERT RESULT:", orderResult);
+
+          const orderId = orderResult.insertId;
+
+          const orderItemValues = itemsResult.map((item) => [
+            orderId,
+            item.product_id,
+            item.product_name,
+            item.price,
+            item.quantity,
+            item.subtotal,
+          ]);
+
+          console.log("ORDER ITEM VALUES:", orderItemValues);
+
+          const insertOrderItemsSql = `
+            INSERT INTO order_items (
+              order_id,
+              product_id,
+              product_name,
+              price,
+              quantity,
+              subtotal
+            )
+            VALUES ?
+          `;
+
+          db.query(insertOrderItemsSql, [orderItemValues], (orderItemsErr) => {
+            if (orderItemsErr) {
+              console.log("INSERT ORDER ITEMS ERROR:", orderItemsErr);
+              return sendError(
+                res,
+                500,
+                "Failed to create order items",
+                orderItemsErr.message
+              );
+            }
+
+            const stockUpdates = itemsResult.map((item) => {
+              return new Promise((resolve, reject) => {
+                db.query(
+                  `UPDATE products SET stock = stock - ? WHERE id = ?`,
+                  [item.quantity, item.product_id],
+                  (stockErr) => {
+                    if (stockErr) {
+                      console.log("STOCK UPDATE ERROR:", stockErr);
+                      reject(stockErr);
+                    } else {
+                      resolve();
+                    }
+                  }
+                );
+              });
+            });
+
+            Promise.all(stockUpdates)
+              .then(() => {
+                db.query(
+                  `DELETE FROM cart_items WHERE cart_id = ?`,
+                  [cart.id],
+                  (deleteErr) => {
+                    if (deleteErr) {
+                      console.log("DELETE CART ITEMS ERROR:", deleteErr);
+                      return sendError(
+                        res,
+                        500,
+                        "Order created but failed to clear cart items",
+                        deleteErr.message
+                      );
+                    }
+
+                    db.query(
+                      `UPDATE carts SET status = 'checked_out' WHERE id = ?`,
+                      [cart.id],
+                      (cartUpdateErr) => {
+                        if (cartUpdateErr) {
+                          console.log("UPDATE CART STATUS ERROR:", cartUpdateErr);
+                          return sendError(
+                            res,
+                            500,
+                            "Order created but failed to update cart status",
+                            cartUpdateErr.message
+                          );
+                        }
+
+                        return sendSuccess(res, 201, "Checkout successful", {
+                          id: orderId,
+                          order_code: orderCode,
+                          customer_name,
+                          customer_address,
+                          customer_phone,
+                          subtotal,
+                          discount,
+                          vat,
+                          total,
+                          status: "pending",
+                        });
+                      }
+                    );
+                  }
+                );
+              })
+              .catch((stockErr) => {
+                return sendError(
+                  res,
+                  500,
+                  "Failed to update product stock",
+                  stockErr.message
+                );
+              });
+          });
+        }
+      );
     });
   });
-};
-exports.getMyOrders = (req, res) => {
-  const userId = req.user.id;
-
-  db.query(
-    "SELECT * FROM orders WHERE user_id = ? ORDER BY id DESC",
-    [userId],
-    (err, result) => {
-      if (err) return res.status(500).json({ message: "Error" });
-
-      res.json(result);
-    }
-  );
 };
