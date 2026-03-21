@@ -1,131 +1,179 @@
 const db = require('../config/db');
 
 // -------------------------------------------------------------------
-// 🔸 CREATE PRODUCT
+// GET ALL PRODUCTS (PUBLIC)
 // -------------------------------------------------------------------
-const createProduct = (req, res) => {
-  const { name, price, stock, image } = req.body;
+exports.getAllProducts = (req, res) => {
+  const sql = `
+    SELECT * FROM products
+    ORDER BY id DESC
+  `;
 
-  if (!name || !price) {
-    return res.status(400).json({
-      message: 'Name and price are required',
-    });
-  }
-
-  const sql =
-    'INSERT INTO products (name, price, stock, image) VALUES (?, ?, ?, ?)';
-
-  db.query(sql, [name, price, stock || 0, image || null], (err, result) => {
+  db.query(sql, (err, result) => {
     if (err) {
-      return res.status(500).json({ message: err.message });
-    }
-
-    res.status(201).json({
-      message: 'Product created successfully',
-      productId: result.insertId,
-    });
-  });
-};
-
-// -------------------------------------------------------------------
-// 🔸 GET ALL PRODUCTS
-// -------------------------------------------------------------------
-const getAllProducts = (req, res) => {
-  const sql = 'SELECT * FROM products ORDER BY id DESC';
-
-  db.query(sql, (err, results) => {
-    if (err) {
-      return res.status(500).json({ message: err.message });
-    }
-
-    res.status(200).json(results);
-  });
-};
-
-// -------------------------------------------------------------------
-// 🔸 GET PRODUCT BY ID
-// -------------------------------------------------------------------
-const getProductById = (req, res) => {
-  const { id } = req.params;
-
-  const sql = 'SELECT * FROM products WHERE id = ?';
-
-  db.query(sql, [id], (err, results) => {
-    if (err) {
-      return res.status(500).json({ message: err.message });
-    }
-
-    if (results.length === 0) {
-      return res.status(404).json({
-        message: 'Product not found',
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch products",
+        error: err.message,
       });
     }
 
-    res.status(200).json(results[0]);
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
   });
 };
 
 // -------------------------------------------------------------------
-// 🔸 PATCH PRODUCT
+// GET PRODUCT BY ID (PUBLIC)
 // -------------------------------------------------------------------
-const patchProduct = (req, res) => {
+exports.getProductById = (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
 
-  if (!updates || Object.keys(updates).length === 0) {
-    return res.status(400).json({
-      message: 'No data provided for update',
-    });
-  }
+  const sql = `
+    SELECT * FROM products
+    WHERE id = ?
+    LIMIT 1
+  `;
 
-  const updateKeys = Object.keys(updates);
-  const isValid = updateKeys.every((key) => ['name', 'price', 'stock', 'image'].includes(key));
-
-  if (!isValid) {
-    return res.status(400).json({
-      message: 'Invalid field(s) in request body',
-    });
-  }
-
-  const setClause = updateKeys.map((key) => `${key} = ?`).join(', ');
-  const values = updateKeys.map((key) => updates[key]);
-
-  const sql = `UPDATE products SET ${setClause} WHERE id = ?`;
-
-  db.query(sql, [...values, id], (err, result) => {
+  db.query(sql, [id], (err, result) => {
     if (err) {
       return res.status(500).json({
-        message: err.message,
+        success: false,
+        message: "Failed to fetch product",
+        error: err.message,
+      });
+    }
+
+    if (result.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: result[0],
+    });
+  });
+};
+
+// -------------------------------------------------------------------
+// CREATE PRODUCT (ADMIN)
+// -------------------------------------------------------------------
+exports.createProduct = (req, res) => {
+  const { name, price, stock, image } = req.body || {};
+
+  if (!name || price === undefined || stock === undefined) {
+    return res.status(400).json({
+      success: false,
+      message: "name, price and stock are required",
+    });
+  }
+
+  const sql = `
+    INSERT INTO products (name, price, stock, image)
+    VALUES (?, ?, ?, ?)
+  `;
+
+  db.query(sql, [name, price, stock, image || null], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to create product",
+        error: err.message,
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Product created successfully",
+      data: {
+        id: result.insertId,
+        name,
+        price,
+        stock,
+        image: image || null,
+      },
+    });
+  });
+};
+
+// -------------------------------------------------------------------
+// UPDATE PRODUCT (ADMIN)
+// -------------------------------------------------------------------
+exports.updateProduct = (req, res) => {
+  const { id } = req.params;
+  const { name, price, stock, image } = req.body || {};
+
+  if (!name || price === undefined || stock === undefined) {
+    return res.status(400).json({
+      success: false,
+      message: "name, price and stock are required",
+    });
+  }
+
+  const sql = `
+    UPDATE products
+    SET name = ?, price = ?, stock = ?, image = ?
+    WHERE id = ?
+  `;
+
+  db.query(sql, [name, price, stock, image || null, id], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update product",
+        error: err.message,
       });
     }
 
     if (result.affectedRows === 0) {
       return res.status(404).json({
-        message: 'Product not found',
+        success: false,
+        message: "Product not found",
       });
     }
 
     return res.status(200).json({
-      message: 'Product updated successfully',
+      success: true,
+      message: "Product updated successfully",
     });
   });
 };
 
 // -------------------------------------------------------------------
-// 🔸 DELETE PRODUCT
+// DELETE PRODUCT (ADMIN)
 // -------------------------------------------------------------------
-const deleteProduct = (req, res) => {
+exports.deleteProduct = (req, res) => {
   const { id } = req.params;
 
-  const sql = 'DELETE FROM products WHERE id = ?';
+  const sql = `
+    DELETE FROM products
+    WHERE id = ?
+  `;
 
   db.query(sql, [id], (err, result) => {
     if (err) {
-      return res.status(500).json({ message: err.message });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to delete product",
+        error: err.message,
+      });
     }
 
-    res.status(200).json({
-      message: 'Product deleted successfully',
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Product deleted successfully",
     });
   });
 };

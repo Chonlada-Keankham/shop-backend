@@ -1,6 +1,6 @@
-const db = require('../config/db');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const db = require("../config/db");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 // -------------------------------------------------------------------
 // REGISTER
@@ -12,11 +12,11 @@ const register = async (req, res) => {
     if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide name, email, and password',
+        message: "Please provide name, email, and password",
       });
     }
 
-    const checkUserQuery = 'SELECT * FROM users WHERE email = ?';
+    const checkUserQuery = "SELECT * FROM users WHERE email = ?";
 
     db.query(checkUserQuery, [email], async (err, results) => {
       if (err) {
@@ -29,7 +29,7 @@ const register = async (req, res) => {
       if (results.length > 0) {
         return res.status(400).json({
           success: false,
-          message: 'Email already exists',
+          message: "Email already exists",
         });
       }
 
@@ -42,13 +42,7 @@ const register = async (req, res) => {
 
       db.query(
         insertUserQuery,
-        [
-          name,
-          email,
-          hashedPassword,
-          phone || null,
-          address || null,
-        ],
+        [name, email, hashedPassword, phone || null, address || null],
         (err, result) => {
           if (err) {
             return res.status(500).json({
@@ -59,7 +53,7 @@ const register = async (req, res) => {
 
           return res.status(201).json({
             success: true,
-            message: 'Registered as customer successfully',
+            message: "Registered as customer successfully",
             userId: result.insertId,
           });
         }
@@ -83,11 +77,11 @@ const login = (req, res) => {
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide email and password',
+        message: "Please provide email and password",
       });
     }
 
-    const findUserQuery = 'SELECT * FROM users WHERE email = ?';
+    const findUserQuery = "SELECT * FROM users WHERE email = ?";
 
     db.query(findUserQuery, [email], async (err, results) => {
       if (err) {
@@ -100,7 +94,7 @@ const login = (req, res) => {
       if (results.length === 0) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid email or password',
+          message: "Invalid email or password",
         });
       }
 
@@ -110,7 +104,7 @@ const login = (req, res) => {
       if (!isMatch) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid email or password',
+          message: "Invalid email or password",
         });
       }
 
@@ -121,12 +115,12 @@ const login = (req, res) => {
           role: user.role,
         },
         process.env.JWT_SECRET,
-        { expiresIn: '1d' }
+        { expiresIn: "1d" }
       );
 
       return res.status(200).json({
         success: true,
-        message: 'Login successful',
+        message: "Login successful",
         token,
         user: {
           id: user.id,

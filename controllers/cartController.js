@@ -4,7 +4,7 @@ const db = require("../config/db");
 // CREATE CART
 // -------------------------------------------------------------------
 exports.createCart = (req, res) => {
-  const { user_id } = req.body;
+const user_id = req.user.id;
 
   if (!user_id) {
     return res.status(400).json({
