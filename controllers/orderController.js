@@ -26,395 +26,350 @@ const isPositiveInteger = (value) => {
 // -------------------------------------------------------------------
 // 🔸 CREATE ORDER (MANUAL / ADMIN)
 // -------------------------------------------------------------------
-exports.createOrder = (req, res) => {
-  const {
-    order_code,
-    user_id,
-    customer_name,
-    customer_address,
-    customer_phone,
-    subtotal = 0,
-    discount = 0,
-    vat = 0,
-    total = 0,
-    status = "pending",
-  } = req.body || {};
+exports.createOrder = async (req, res) => {
+  try {
+    const {
+      order_code,
+      user_id,
+      customer_name,
+      customer_address,
+      customer_phone,
+      subtotal = 0,
+      discount = 0,
+      vat = 0,
+      total = 0,
+      status = "pending",
+    } = req.body || {};
 
-  const allowedStatus = ["pending", "completed", "cancelled"];
+    const allowedStatus = ["pending", "completed", "cancelled"];
 
-  if (!order_code) {
-    return sendError(res, 400, "order_code is required");
-  }
-
-  if (!isPositiveInteger(user_id)) {
-    return sendError(res, 400, "Valid user_id is required");
-  }
-
-  if (!customer_name) {
-    return sendError(res, 400, "customer_name is required");
-  }
-
-  if (!customer_address) {
-    return sendError(res, 400, "customer_address is required");
-  }
-
-  if (!customer_phone) {
-    return sendError(res, 400, "customer_phone is required");
-  }
-
-  if (!allowedStatus.includes(status)) {
-    return sendError(res, 400, "Invalid status value");
-  }
-
-  const checkUserSql = `
-    SELECT id
-    FROM users
-    WHERE id = ?
-    LIMIT 1
-  `;
-
-  db.query(checkUserSql, [user_id], (userErr, userResult) => {
-    if (userErr) {
-      return sendError(res, 500, "Failed to check user", userErr.message);
+    if (!order_code) {
+      return sendError(res, 400, "order_code is required");
     }
 
-    if (userResult.length === 0) {
+    if (!isPositiveInteger(user_id)) {
+      return sendError(res, 400, "Valid user_id is required");
+    }
+
+    if (!customer_name) {
+      return sendError(res, 400, "customer_name is required");
+    }
+
+    if (!customer_address) {
+      return sendError(res, 400, "customer_address is required");
+    }
+
+    if (!customer_phone) {
+      return sendError(res, 400, "customer_phone is required");
+    }
+
+    if (!allowedStatus.includes(status)) {
+      return sendError(res, 400, "Invalid status value");
+    }
+
+    const userResult = await db.query(
+      `
+      SELECT id
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [user_id]
+    );
+
+    if (userResult.rows.length === 0) {
       return sendError(res, 404, "User not found");
     }
 
-    const checkOrderCodeSql = `
+    const codeResult = await db.query(
+      `
       SELECT id
       FROM orders
-      WHERE order_code = ?
+      WHERE order_code = $1
       LIMIT 1
-    `;
+      `,
+      [order_code]
+    );
 
-    db.query(checkOrderCodeSql, [order_code], (codeErr, codeResult) => {
-      if (codeErr) {
-        return sendError(res, 500, "Failed to check order_code", codeErr.message);
-      }
+    if (codeResult.rows.length > 0) {
+      return sendError(res, 400, "order_code already exists");
+    }
 
-      if (codeResult.length > 0) {
-        return sendError(res, 400, "order_code already exists");
-      }
+    const insertResult = await db.query(
+      `
+      INSERT INTO orders (
+        order_code,
+        user_id,
+        customer_name,
+        customer_address,
+        customer_phone,
+        subtotal,
+        discount,
+        vat,
+        total,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+      `,
+      [
+        order_code,
+        user_id,
+        customer_name,
+        customer_address,
+        customer_phone,
+        Number(subtotal),
+        Number(discount),
+        Number(vat),
+        Number(total),
+        status,
+      ]
+    );
 
-      const insertSql = `
-        INSERT INTO orders (
-          order_code,
-          user_id,
-          customer_name,
-          customer_address,
-          customer_phone,
-          subtotal,
-          discount,
-          vat,
-          total,
-          status
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
-      db.query(
-        insertSql,
-        [
-          order_code,
-          user_id,
-          customer_name,
-          customer_address,
-          customer_phone,
-          subtotal,
-          discount,
-          vat,
-          total,
-          status,
-        ],
-        (insertErr, insertResult) => {
-          if (insertErr) {
-            return sendError(res, 500, "Failed to create order", insertErr.message);
-          }
-
-          const getNewOrderSql = `
-            SELECT *
-            FROM orders
-            WHERE id = ?
-            LIMIT 1
-          `;
-
-          db.query(getNewOrderSql, [insertResult.insertId], (fetchErr, fetchResult) => {
-            if (fetchErr) {
-              return sendError(
-                res,
-                500,
-                "Order created but failed to fetch data",
-                fetchErr.message
-              );
-            }
-
-            return sendSuccess(res, 201, "Order created successfully", fetchResult[0]);
-          });
-        }
-      );
-    });
-  });
+    return sendSuccess(
+      res,
+      201,
+      "Order created successfully",
+      insertResult.rows[0]
+    );
+  } catch (error) {
+    return sendError(res, 500, "Failed to create order", error.message);
+  }
 };
 
 // -------------------------------------------------------------------
 // 🔸 GET ALL ORDERS
 // -------------------------------------------------------------------
-exports.getAllOrders = (req, res) => {
-  const sql = `
-    SELECT *
-    FROM orders
-    ORDER BY id DESC
-  `;
+exports.getAllOrders = async (req, res) => {
+  try {
+    const result = await db.query(
+      `
+      SELECT *
+      FROM orders
+      ORDER BY id DESC
+      `
+    );
 
-  db.query(sql, (err, result) => {
-    if (err) {
-      return sendError(res, 500, "Failed to get orders", err.message);
-    }
-
-    return sendSuccess(res, 200, "Orders retrieved successfully", result);
-  });
+    return sendSuccess(res, 200, "Orders retrieved successfully", result.rows);
+  } catch (error) {
+    return sendError(res, 500, "Failed to get orders", error.message);
+  }
 };
 
 // -------------------------------------------------------------------
 // 🔸 GET ORDER BY ID
 // -------------------------------------------------------------------
-exports.getOrderById = (req, res) => {
-  const { id } = req.params;
+exports.getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-  if (!isPositiveInteger(id)) {
-    return sendError(res, 400, "Valid order id is required");
-  }
-
-  const sql = `
-    SELECT *
-    FROM orders
-    WHERE id = ?
-    LIMIT 1
-  `;
-
-  db.query(sql, [id], (err, result) => {
-    if (err) {
-      return sendError(res, 500, "Failed to get order", err.message);
+    if (!isPositiveInteger(id)) {
+      return sendError(res, 400, "Valid order id is required");
     }
 
-    if (result.length === 0) {
+    const result = await db.query(
+      `
+      SELECT *
+      FROM orders
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
       return sendError(res, 404, "Order not found");
     }
 
-    return sendSuccess(res, 200, "Order retrieved successfully", result[0]);
-  });
+    return sendSuccess(
+      res,
+      200,
+      "Order retrieved successfully",
+      result.rows[0]
+    );
+  } catch (error) {
+    return sendError(res, 500, "Failed to get order", error.message);
+  }
 };
 
 // -------------------------------------------------------------------
 // 🔸 GET ORDERS BY USER ID
 // -------------------------------------------------------------------
-exports.getOrdersByUserId = (req, res) => {
-  const { userId } = req.params;
+exports.getOrdersByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
 
-  if (!isPositiveInteger(userId)) {
-    return sendError(res, 400, "Valid userId is required");
-  }
-
-  const sql = `
-    SELECT *
-    FROM orders
-    WHERE user_id = ?
-    ORDER BY id DESC
-  `;
-
-  db.query(sql, [userId], (err, result) => {
-    if (err) {
-      return sendError(res, 500, "Failed to get user orders", err.message);
+    if (!isPositiveInteger(userId)) {
+      return sendError(res, 400, "Valid userId is required");
     }
 
-    return sendSuccess(res, 200, "User orders retrieved successfully", result);
-  });
+    const result = await db.query(
+      `
+      SELECT *
+      FROM orders
+      WHERE user_id = $1
+      ORDER BY id DESC
+      `,
+      [userId]
+    );
+
+    return sendSuccess(
+      res,
+      200,
+      "User orders retrieved successfully",
+      result.rows
+    );
+  } catch (error) {
+    return sendError(res, 500, "Failed to get user orders", error.message);
+  }
 };
 
 // -------------------------------------------------------------------
 // 🔸 UPDATE ORDER STATUS
 // -------------------------------------------------------------------
-exports.updateOrderStatus = (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body || {};
+exports.updateOrderStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
 
-  const allowedStatus = ["pending", "completed", "cancelled"];
+    const allowedStatus = ["pending", "completed", "cancelled"];
 
-  if (!isPositiveInteger(id)) {
-    return sendError(res, 400, "Valid order id is required");
-  }
-
-  if (!status) {
-    return sendError(res, 400, "status is required");
-  }
-
-  if (!allowedStatus.includes(status)) {
-    return sendError(res, 400, "Invalid status value");
-  }
-
-  const checkOrderSql = `
-    SELECT *
-    FROM orders
-    WHERE id = ?
-    LIMIT 1
-  `;
-
-  db.query(checkOrderSql, [id], (checkErr, checkResult) => {
-    if (checkErr) {
-      return sendError(res, 500, "Failed to check order", checkErr.message);
+    if (!isPositiveInteger(id)) {
+      return sendError(res, 400, "Valid order id is required");
     }
 
-    if (checkResult.length === 0) {
+    if (!status) {
+      return sendError(res, 400, "status is required");
+    }
+
+    if (!allowedStatus.includes(status)) {
+      return sendError(res, 400, "Invalid status value");
+    }
+
+    const result = await db.query(
+      `
+      UPDATE orders
+      SET status = $1
+      WHERE id = $2
+      RETURNING *
+      `,
+      [status, id]
+    );
+
+    if (result.rows.length === 0) {
       return sendError(res, 404, "Order not found");
     }
 
-    const updateSql = `
-      UPDATE orders
-      SET status = ?
-      WHERE id = ?
-    `;
-
-    db.query(updateSql, [status, id], (updateErr) => {
-      if (updateErr) {
-        return sendError(res, 500, "Failed to update order status", updateErr.message);
-      }
-
-      const getUpdatedSql = `
-        SELECT *
-        FROM orders
-        WHERE id = ?
-        LIMIT 1
-      `;
-
-      db.query(getUpdatedSql, [id], (fetchErr, fetchResult) => {
-        if (fetchErr) {
-          return sendError(
-            res,
-            500,
-            "Status updated but failed to fetch order",
-            fetchErr.message
-          );
-        }
-
-        return sendSuccess(
-          res,
-          200,
-          "Order status updated successfully",
-          fetchResult[0]
-        );
-      });
-    });
-  });
+    return sendSuccess(
+      res,
+      200,
+      "Order status updated successfully",
+      result.rows[0]
+    );
+  } catch (error) {
+    return sendError(res, 500, "Failed to update order status", error.message);
+  }
 };
 
 // -------------------------------------------------------------------
 // 🔸 DELETE ORDER
 // -------------------------------------------------------------------
-exports.deleteOrder = (req, res) => {
-  const { id } = req.params;
+exports.deleteOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-  if (!isPositiveInteger(id)) {
-    return sendError(res, 400, "Valid order id is required");
-  }
-
-  const checkSql = `
-    SELECT *
-    FROM orders
-    WHERE id = ?
-    LIMIT 1
-  `;
-
-  db.query(checkSql, [id], (checkErr, checkResult) => {
-    if (checkErr) {
-      return sendError(res, 500, "Failed to check order", checkErr.message);
+    if (!isPositiveInteger(id)) {
+      return sendError(res, 400, "Valid order id is required");
     }
 
-    if (checkResult.length === 0) {
+    const result = await db.query(
+      `
+      DELETE FROM orders
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
       return sendError(res, 404, "Order not found");
     }
 
-    const deleteSql = `
-      DELETE FROM orders
-      WHERE id = ?
-    `;
-
-    db.query(deleteSql, [id], (deleteErr) => {
-      if (deleteErr) {
-        return sendError(res, 500, "Failed to delete order", deleteErr.message);
-      }
-
-      return sendSuccess(res, 200, "Order deleted successfully");
-    });
-  });
+    return sendSuccess(res, 200, "Order deleted successfully");
+  } catch (error) {
+    return sendError(res, 500, "Failed to delete order", error.message);
+  }
 };
 
 // -------------------------------------------------------------------
 // 🔸 GET MY ORDERS
 // -------------------------------------------------------------------
-exports.getMyOrders = (req, res) => {
-  const userId = req.user.id;
+exports.getMyOrders = async (req, res) => {
+  try {
+    const userId = req.user.id;
 
-  const sql = `
-    SELECT *
-    FROM orders
-    WHERE user_id = ?
-    ORDER BY id DESC
-  `;
+    const result = await db.query(
+      `
+      SELECT *
+      FROM orders
+      WHERE user_id = $1
+      ORDER BY id DESC
+      `,
+      [userId]
+    );
 
-  db.query(sql, [userId], (err, result) => {
-    if (err) {
-      return sendError(res, 500, "Failed to get my orders", err.message);
-    }
-
-    return sendSuccess(res, 200, "My orders retrieved successfully", result);
-  });
+    return sendSuccess(
+      res,
+      200,
+      "My orders retrieved successfully",
+      result.rows
+    );
+  } catch (error) {
+    return sendError(res, 500, "Failed to get my orders", error.message);
+  }
 };
 
 // -------------------------------------------------------------------
 // 🔸 CHECKOUT
 // -------------------------------------------------------------------
-// -------------------------------------------------------------------
-// 🔸 CHECKOUT
-// -------------------------------------------------------------------
-exports.checkout = (req, res) => {
-  const userId = req.user.id;
-  const { customer_name, customer_address, customer_phone } = req.body || {};
+exports.checkout = async (req, res) => {
+  const client = await db.connect();
 
-  console.log("CHECKOUT BODY:", req.body);
-  console.log("CHECKOUT USER ID:", userId);
+  try {
+    const userId = req.user.id;
+    const { customer_name, customer_address, customer_phone } = req.body || {};
 
-  if (!customer_name || !customer_address || !customer_phone) {
-    return sendError(
-      res,
-      400,
-      "customer_name, customer_address, and customer_phone are required"
-    );
-  }
-
-  const getCartSql = `
-    SELECT *
-    FROM carts
-    WHERE user_id = ? AND status = 'active'
-    LIMIT 1
-  `;
-
-  db.query(getCartSql, [userId], (cartErr, cartResult) => {
-    if (cartErr) {
-      console.log("GET CART ERROR:", cartErr);
-      return sendError(res, 500, "Failed to get active cart", cartErr.message);
+    if (!customer_name || !customer_address || !customer_phone) {
+      client.release();
+      return sendError(
+        res,
+        400,
+        "customer_name, customer_address, and customer_phone are required"
+      );
     }
 
-    console.log("CART RESULT:", cartResult);
+    await client.query("BEGIN");
 
-    if (cartResult.length === 0) {
+    const cartResult = await client.query(
+      `
+      SELECT *
+      FROM carts
+      WHERE user_id = $1 AND status = 'active'
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (cartResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      client.release();
       return sendError(res, 404, "Active cart not found");
     }
 
-    const cart = cartResult[0];
+    const cart = cartResult.rows[0];
 
-    const getItemsSql = `
+    const itemsResult = await client.query(
+      `
       SELECT 
         ci.product_id,
         ci.quantity,
@@ -424,41 +379,57 @@ exports.checkout = (req, res) => {
         (ci.quantity * p.price) AS subtotal
       FROM cart_items ci
       JOIN products p ON ci.product_id = p.id
-      WHERE ci.cart_id = ?
-    `;
+      WHERE ci.cart_id = $1
+      ORDER BY ci.id ASC
+      `,
+      [cart.id]
+    );
 
-    db.query(getItemsSql, [cart.id], (itemsErr, itemsResult) => {
-      if (itemsErr) {
-        console.log("GET ITEMS ERROR:", itemsErr);
-        return sendError(res, 500, "Failed to get cart items", itemsErr.message);
+    if (itemsResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      client.release();
+      return sendError(res, 400, "Cart is empty");
+    }
+
+    for (const item of itemsResult.rows) {
+      if (Number(item.stock) < Number(item.quantity)) {
+        await client.query("ROLLBACK");
+        client.release();
+        return sendError(
+          res,
+          400,
+          `Insufficient stock for product: ${item.product_name}`
+        );
       }
+    }
 
-      console.log("ITEMS RESULT:", itemsResult);
+    const subtotal = itemsResult.rows.reduce(
+      (sum, item) => sum + Number(item.subtotal),
+      0
+    );
+    const discount = 0;
+    const vat = Number((subtotal * 0.07).toFixed(2));
+    const total = Number((subtotal - discount + vat).toFixed(2));
+    const orderCode = `ORD-${Date.now()}`;
 
-      if (itemsResult.length === 0) {
-        return sendError(res, 400, "Cart is empty");
-      }
-
-      for (const item of itemsResult) {
-        if (Number(item.stock) < Number(item.quantity)) {
-          return sendError(
-            res,
-            400,
-            `Insufficient stock for product: ${item.product_name}`
-          );
-        }
-      }
-
-      const subtotal = itemsResult.reduce(
-        (sum, item) => sum + Number(item.subtotal),
-        0
-      );
-      const discount = 0;
-      const vat = Number((subtotal * 0.07).toFixed(2));
-      const total = Number((subtotal - discount + vat).toFixed(2));
-      const orderCode = `ORD-${Date.now()}`;
-
-      console.log("ORDER DATA:", {
+    const orderInsertResult = await client.query(
+      `
+      INSERT INTO orders (
+        order_code,
+        user_id,
+        customer_name,
+        customer_address,
+        customer_phone,
+        subtotal,
+        discount,
+        vat,
+        total,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+      RETURNING *
+      `,
+      [
         orderCode,
         userId,
         customer_name,
@@ -468,156 +439,83 @@ exports.checkout = (req, res) => {
         discount,
         vat,
         total,
-      });
+      ]
+    );
 
-      const insertOrderSql = `
-        INSERT INTO orders (
-          order_code,
-          user_id,
-          customer_name,
-          customer_address,
-          customer_phone,
-          subtotal,
-          discount,
-          vat,
-          total,
-          status
+    const order = orderInsertResult.rows[0];
+
+    for (const item of itemsResult.rows) {
+      await client.query(
+        `
+        INSERT INTO order_items (
+          order_id,
+          product_id,
+          product_name,
+          price,
+          quantity,
+          subtotal
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-      `;
-
-      db.query(
-        insertOrderSql,
+        VALUES ($1, $2, $3, $4, $5, $6)
+        `,
         [
-          orderCode,
-          userId,
-          customer_name,
-          customer_address,
-          customer_phone,
-          subtotal,
-          discount,
-          vat,
-          total,
-        ],
-        (orderErr, orderResult) => {
-          if (orderErr) {
-            console.log("INSERT ORDER ERROR:", orderErr);
-            return sendError(res, 500, "Failed to create order", orderErr.message);
-          }
-
-          console.log("ORDER INSERT RESULT:", orderResult);
-
-          const orderId = orderResult.insertId;
-
-          const orderItemValues = itemsResult.map((item) => [
-            orderId,
-            item.product_id,
-            item.product_name,
-            item.price,
-            item.quantity,
-            item.subtotal,
-          ]);
-
-          console.log("ORDER ITEM VALUES:", orderItemValues);
-
-          const insertOrderItemsSql = `
-            INSERT INTO order_items (
-              order_id,
-              product_id,
-              product_name,
-              price,
-              quantity,
-              subtotal
-            )
-            VALUES ?
-          `;
-
-          db.query(insertOrderItemsSql, [orderItemValues], (orderItemsErr) => {
-            if (orderItemsErr) {
-              console.log("INSERT ORDER ITEMS ERROR:", orderItemsErr);
-              return sendError(
-                res,
-                500,
-                "Failed to create order items",
-                orderItemsErr.message
-              );
-            }
-
-            const stockUpdates = itemsResult.map((item) => {
-              return new Promise((resolve, reject) => {
-                db.query(
-                  `UPDATE products SET stock = stock - ? WHERE id = ?`,
-                  [item.quantity, item.product_id],
-                  (stockErr) => {
-                    if (stockErr) {
-                      console.log("STOCK UPDATE ERROR:", stockErr);
-                      reject(stockErr);
-                    } else {
-                      resolve();
-                    }
-                  }
-                );
-              });
-            });
-
-            Promise.all(stockUpdates)
-              .then(() => {
-                db.query(
-                  `DELETE FROM cart_items WHERE cart_id = ?`,
-                  [cart.id],
-                  (deleteErr) => {
-                    if (deleteErr) {
-                      console.log("DELETE CART ITEMS ERROR:", deleteErr);
-                      return sendError(
-                        res,
-                        500,
-                        "Order created but failed to clear cart items",
-                        deleteErr.message
-                      );
-                    }
-
-                    db.query(
-                      `UPDATE carts SET status = 'checked_out' WHERE id = ?`,
-                      [cart.id],
-                      (cartUpdateErr) => {
-                        if (cartUpdateErr) {
-                          console.log("UPDATE CART STATUS ERROR:", cartUpdateErr);
-                          return sendError(
-                            res,
-                            500,
-                            "Order created but failed to update cart status",
-                            cartUpdateErr.message
-                          );
-                        }
-
-                        return sendSuccess(res, 201, "Checkout successful", {
-                          id: orderId,
-                          order_code: orderCode,
-                          customer_name,
-                          customer_address,
-                          customer_phone,
-                          subtotal,
-                          discount,
-                          vat,
-                          total,
-                          status: "pending",
-                        });
-                      }
-                    );
-                  }
-                );
-              })
-              .catch((stockErr) => {
-                return sendError(
-                  res,
-                  500,
-                  "Failed to update product stock",
-                  stockErr.message
-                );
-              });
-          });
-        }
+          order.id,
+          item.product_id,
+          item.product_name,
+          item.price,
+          item.quantity,
+          item.subtotal,
+        ]
       );
+    }
+
+    for (const item of itemsResult.rows) {
+      await client.query(
+        `
+        UPDATE products
+        SET stock = stock - $1
+        WHERE id = $2
+        `,
+        [item.quantity, item.product_id]
+      );
+    }
+
+    await client.query(
+      `
+      DELETE FROM cart_items
+      WHERE cart_id = $1
+      `,
+      [cart.id]
+    );
+
+    await client.query(
+      `
+      UPDATE carts
+      SET status = 'checked_out', updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      `,
+      [cart.id]
+    );
+
+    await client.query("COMMIT");
+    client.release();
+
+    return sendSuccess(res, 201, "Checkout successful", {
+      id: order.id,
+      order_code: order.order_code,
+      customer_name: order.customer_name,
+      customer_address: order.customer_address,
+      customer_phone: order.customer_phone,
+      subtotal: Number(order.subtotal),
+      discount: Number(order.discount),
+      vat: Number(order.vat),
+      total: Number(order.total),
+      status: order.status,
     });
-  });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) {}
+    client.release();
+    return sendError(res, 500, "Failed to checkout", error.message);
+  }
 };
