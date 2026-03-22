@@ -1,179 +1,104 @@
 const db = require("../config/db");
 
 // -------------------------------------------------------------------
-// GET ALL PRODUCTS (PUBLIC)
+// CREATE PRODUCT
 // -------------------------------------------------------------------
-exports.getAllProducts = (req, res) => {
-  const sql = `
-    SELECT * FROM products
-    ORDER BY id DESC
-  `;
+exports.createProduct = async (req, res) => {
+  const { name, description, price, stock, image } = req.body;
 
-  db.query(sql, (err, result) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch products",
-        error: err.message,
-      });
-    }
+  try {
+    const result = await db.query(
+      `INSERT INTO products (name, description, price, stock, image)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [name, description, price, stock, image]
+    );
 
-    return res.status(200).json({
-      success: true,
-      data: result,
-    });
-  });
-};
-
-// -------------------------------------------------------------------
-// GET PRODUCT BY ID (PUBLIC)
-// -------------------------------------------------------------------
-exports.getProductById = (req, res) => {
-  const { id } = req.params;
-
-  const sql = `
-    SELECT * FROM products
-    WHERE id = ?
-    LIMIT 1
-  `;
-
-  db.query(sql, [id], (err, result) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch product",
-        error: err.message,
-      });
-    }
-
-    if (result.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: result[0],
-    });
-  });
-};
-
-// -------------------------------------------------------------------
-// CREATE PRODUCT (ADMIN)
-// -------------------------------------------------------------------
-exports.createProduct = (req, res) => {
-  const { name, price, stock, image } = req.body || {};
-
-  if (!name || price === undefined || stock === undefined) {
-    return res.status(400).json({
-      success: false,
-      message: "name, price and stock are required",
-    });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const sql = `
-    INSERT INTO products (name, price, stock, image)
-    VALUES (?, ?, ?, ?)
-  `;
-
-  db.query(sql, [name, price, stock, image || null], (err, result) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to create product",
-        error: err.message,
-      });
-    }
-
-    return res.status(201).json({
-      success: true,
-      message: "Product created successfully",
-      data: {
-        id: result.insertId,
-        name,
-        price,
-        stock,
-        image: image || null,
-      },
-    });
-  });
 };
 
 // -------------------------------------------------------------------
-// UPDATE PRODUCT (ADMIN)
+// GET ALL PRODUCTS
 // -------------------------------------------------------------------
-exports.updateProduct = (req, res) => {
-  const { id } = req.params;
-  const { name, price, stock, image } = req.body || {};
-
-  if (!name || price === undefined || stock === undefined) {
-    return res.status(400).json({
-      success: false,
-      message: "name, price and stock are required",
-    });
+exports.getAllProducts = async (req, res) => {
+  try {
+    const result = await db.query("SELECT * FROM products ORDER BY id DESC");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const sql = `
-    UPDATE products
-    SET name = ?, price = ?, stock = ?, image = ?
-    WHERE id = ?
-  `;
-
-  db.query(sql, [name, price, stock, image || null, id], (err, result) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to update product",
-        error: err.message,
-      });
-    }
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Product updated successfully",
-    });
-  });
 };
 
 // -------------------------------------------------------------------
-// DELETE PRODUCT (ADMIN)
+// GET PRODUCT BY ID
 // -------------------------------------------------------------------
-exports.deleteProduct = (req, res) => {
+exports.getProductById = async (req, res) => {
   const { id } = req.params;
 
-  const sql = `
-    DELETE FROM products
-    WHERE id = ?
-  `;
+  try {
+    const result = await db.query("SELECT * FROM products WHERE id = $1", [id]);
 
-  db.query(sql, [id], (err, result) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to delete product",
-        error: err.message,
-      });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
     }
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// -------------------------------------------------------------------
+// UPDATE PRODUCT
+// -------------------------------------------------------------------
+exports.updateProduct = async (req, res) => {
+  const { id } = req.params;
+  const { name, description, price, stock, image } = req.body;
+
+  try {
+    const result = await db.query(
+      `UPDATE products
+       SET name = $1,
+           description = $2,
+           price = $3,
+           stock = $4,
+           image = $5
+       WHERE id = $6
+       RETURNING *`,
+      [name, description, price, stock, image, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
     }
 
-    return res.status(200).json({
-      success: true,
-      message: "Product deleted successfully",
-    });
-  });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// -------------------------------------------------------------------
+// DELETE PRODUCT
+// -------------------------------------------------------------------
+exports.deleteProduct = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await db.query(
+      "DELETE FROM products WHERE id = $1 RETURNING *",
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    res.json({ message: "Deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
