@@ -10,7 +10,6 @@ const cartItemRoutes = require('./routes/cartItemRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const orderItemRoutes = require('./routes/orderItemRoutes');
 
-
 const app = express();
 
 app.use(cors());
