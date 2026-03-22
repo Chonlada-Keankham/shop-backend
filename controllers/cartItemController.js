@@ -21,7 +21,6 @@ exports.addItemToCart = async (req, res) => {
       });
     }
 
-    // ตรวจสอบ cart
     const cartCheck = await db.query(
       `SELECT * FROM carts WHERE id = $1 AND status = 'active' LIMIT 1`,
       [cart_id]
@@ -34,7 +33,6 @@ exports.addItemToCart = async (req, res) => {
       });
     }
 
-    // ตรวจสอบสินค้า
     const productCheck = await db.query(
       `SELECT * FROM products WHERE id = $1 LIMIT 1`,
       [product_id]
@@ -56,7 +54,6 @@ exports.addItemToCart = async (req, res) => {
       });
     }
 
-    // เช็คว่ามี item อยู่แล้วไหม
     const itemCheck = await db.query(
       `SELECT * FROM cart_items WHERE cart_id = $1 AND product_id = $2 LIMIT 1`,
       [cart_id, product_id]
@@ -74,26 +71,36 @@ exports.addItemToCart = async (req, res) => {
       }
 
       await db.query(
-        `UPDATE cart_items SET quantity = $1 WHERE id = $2`,
+        `UPDATE cart_items
+         SET quantity = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
         [newQty, existing.id]
       );
 
       const updated = await db.query(
-        `SELECT ci.*, p.name AS product_name, p.price
+        `SELECT 
+           ci.id,
+           ci.cart_id,
+           ci.product_id,
+           p.name AS product_name,
+           p.price,
+           ci.quantity,
+           (p.price * ci.quantity) AS subtotal,
+           ci.created_at,
+           ci.updated_at
          FROM cart_items ci
          JOIN products p ON ci.product_id = p.id
          WHERE ci.id = $1`,
         [existing.id]
       );
 
-      return res.json({
+      return res.status(200).json({
         success: true,
-        message: "Cart item updated",
+        message: "Cart item quantity updated successfully",
         data: updated.rows[0],
       });
     }
 
-    // insert ใหม่
     const insert = await db.query(
       `INSERT INTO cart_items (cart_id, product_id, quantity)
        VALUES ($1, $2, $3)
@@ -102,7 +109,16 @@ exports.addItemToCart = async (req, res) => {
     );
 
     const newItem = await db.query(
-      `SELECT ci.*, p.name AS product_name, p.price
+      `SELECT 
+         ci.id,
+         ci.cart_id,
+         ci.product_id,
+         p.name AS product_name,
+         p.price,
+         ci.quantity,
+         (p.price * ci.quantity) AS subtotal,
+         ci.created_at,
+         ci.updated_at
        FROM cart_items ci
        JOIN products p ON ci.product_id = p.id
        WHERE ci.id = $1`,
@@ -111,16 +127,20 @@ exports.addItemToCart = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Item added",
+      message: "Item added to cart successfully",
       data: newItem.rows[0],
     });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add item to cart",
+      error: err.message,
+    });
   }
 };
 
 // -------------------------------------------------------------------
-// GET ITEMS BY CART
+// GET ITEMS BY CART ID
 // -------------------------------------------------------------------
 exports.getItemsByCartId = async (req, res) => {
   try {
@@ -128,15 +148,15 @@ exports.getItemsByCartId = async (req, res) => {
 
     const result = await db.query(
       `SELECT 
-        ci.id,
-        ci.cart_id,
-        ci.product_id,
-        p.name AS product_name,
-        p.price,
-        ci.quantity,
-        (p.price * ci.quantity) AS subtotal,
-        ci.created_at,
-        ci.updated_at
+         ci.id,
+         ci.cart_id,
+         ci.product_id,
+         p.name AS product_name,
+         p.price,
+         ci.quantity,
+         (p.price * ci.quantity) AS subtotal,
+         ci.created_at,
+         ci.updated_at
        FROM cart_items ci
        JOIN products p ON ci.product_id = p.id
        WHERE ci.cart_id = $1
@@ -144,100 +164,205 @@ exports.getItemsByCartId = async (req, res) => {
       [cartId]
     );
 
-    res.json({
+    return res.status(200).json({
       success: true,
+      message: "Cart items retrieved successfully",
       data: result.rows,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get cart items",
+      error: err.message,
+    });
   }
 };
 
 // -------------------------------------------------------------------
-// UPDATE QUANTITY
+// GET CART ITEM BY ID
+// -------------------------------------------------------------------
+exports.getCartItemById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      `SELECT 
+         ci.id,
+         ci.cart_id,
+         ci.product_id,
+         p.name AS product_name,
+         p.price,
+         ci.quantity,
+         (p.price * ci.quantity) AS subtotal,
+         ci.created_at,
+         ci.updated_at
+       FROM cart_items ci
+       JOIN products p ON ci.product_id = p.id
+       WHERE ci.id = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart item not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Cart item retrieved successfully",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get cart item",
+      error: err.message,
+    });
+  }
+};
+
+// -------------------------------------------------------------------
+// UPDATE CART ITEM QUANTITY
 // -------------------------------------------------------------------
 exports.updateCartItemQuantity = async (req, res) => {
   try {
     const { id } = req.params;
-    const { quantity } = req.body;
+    const { quantity } = req.body || {};
 
     if (!quantity || quantity <= 0) {
-      return res.status(400).json({ message: "Invalid quantity" });
+      return res.status(400).json({
+        success: false,
+        message: "quantity must be greater than 0",
+      });
     }
 
     const check = await db.query(
       `SELECT ci.*, p.stock
        FROM cart_items ci
        JOIN products p ON ci.product_id = p.id
-       WHERE ci.id = $1`,
+       WHERE ci.id = $1
+       LIMIT 1`,
       [id]
     );
 
     if (check.rows.length === 0) {
-      return res.status(404).json({ message: "Item not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Cart item not found",
+      });
     }
 
     if (quantity > check.rows[0].stock) {
-      return res.status(400).json({ message: "Insufficient stock" });
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient stock",
+      });
     }
 
     await db.query(
-      `UPDATE cart_items SET quantity = $1 WHERE id = $2`,
+      `UPDATE cart_items
+       SET quantity = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
       [quantity, id]
     );
 
-    res.json({ success: true });
+    const updated = await db.query(
+      `SELECT 
+         ci.id,
+         ci.cart_id,
+         ci.product_id,
+         p.name AS product_name,
+         p.price,
+         ci.quantity,
+         (p.price * ci.quantity) AS subtotal,
+         ci.created_at,
+         ci.updated_at
+       FROM cart_items ci
+       JOIN products p ON ci.product_id = p.id
+       WHERE ci.id = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Cart item quantity updated successfully",
+      data: updated.rows[0],
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update cart item quantity",
+      error: err.message,
+    });
   }
 };
 
 // -------------------------------------------------------------------
-// DELETE
+// DELETE CART ITEM
 // -------------------------------------------------------------------
 exports.deleteCartItem = async (req, res) => {
   try {
     const { id } = req.params;
 
     const result = await db.query(
-      `DELETE FROM cart_items WHERE id = $1 RETURNING *`,
+      `DELETE FROM cart_items
+       WHERE id = $1
+       RETURNING *`,
       [id]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Cart item not found",
+      });
     }
 
-    res.json({ success: true });
+    return res.status(200).json({
+      success: true,
+      message: "Cart item deleted successfully",
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete cart item",
+      error: err.message,
+    });
   }
 };
 
 // -------------------------------------------------------------------
-// TOTAL
+// GET CART TOTAL BY CART ID
 // -------------------------------------------------------------------
 exports.getCartTotalByCartId = async (req, res) => {
   try {
     const { cartId } = req.params;
 
     const result = await db.query(
-      `SELECT 
-        COALESCE(SUM(p.price * ci.quantity), 0) AS total_price
+      `SELECT COALESCE(SUM(p.price * ci.quantity), 0) AS total_price
        FROM cart_items ci
        JOIN products p ON ci.product_id = p.id
        WHERE ci.cart_id = $1`,
       [cartId]
     );
 
-    res.json({
+    return res.status(200).json({
       success: true,
+      message: "Cart total retrieved successfully",
       data: {
         cart_id: Number(cartId),
         total_price: Number(result.rows[0].total_price),
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get cart total",
+      error: err.message,
+    });
   }
 };
